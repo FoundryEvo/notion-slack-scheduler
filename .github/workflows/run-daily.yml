@@ -2,7 +2,7 @@ name: Daily Notion → Slack Notification
 
 on:
   schedule:
-    - cron: "4 12 * * *" # 每天 UTC 23:00 运行（日本时间 08:00）
+    - cron: "5 12 * * *" # 每天 UTC 23:00 运行（日本时间 08:00）
   workflow_dispatch: # 允许手动触发
 
 jobs:
