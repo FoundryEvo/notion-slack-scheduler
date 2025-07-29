@@ -70,7 +70,7 @@ for page in data.get("results", []):
     if not notified:
         # 拼接通知消息
         person_names = " 和 ".join(persons) if persons else "值班人员"
-        message = f"{person_names}，你们今天的值班任务是：{duty}"
+        message = f"Good morning! {person_names}，Today, your lab duty is ：{duty}, Thanks for your work!"
         print(f" 发送消息: {message}")
 
         # 发送 Slack 消息
