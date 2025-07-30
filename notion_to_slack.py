@@ -52,7 +52,7 @@ for page in data.get("results", []):
     # 获取任务名称 Duty
     duty = props["Duty"]["title"][0]["plain_text"] if props["Duty"]["title"] else "未命名任务"
 
-    # Slack 用户 ID
+    # Slack 用户 ID（从 Notion 字段获取）
     slack1 = props.get("Slack Username 1", {}).get("rich_text", [])
     slack1 = slack1[0]["plain_text"] if slack1 else None
 
@@ -68,12 +68,26 @@ for page in data.get("results", []):
     notified = props.get("Notification Status", {}).get("checkbox", False)
 
     if not notified:
-        # 拼接通知消息
-        person_names = " 和 ".join(persons) if persons else "值班人员"
-        message = f"Good morning! {person_names}，Today, your lab duty is ：{duty}, Thanks for your work!"
+        # 拼接 Slack mention 格式
+        mentions = []
+        for sid in [slack1, slack2]:
+            if sid and sid.startswith("U"):  # 确保是 Slack 用户 ID
+                mentions.append(f"<@{sid}>")
+
+        # 如果 Slack ID 都不存在，使用人员姓名
+        mention_text = " ".join(mentions) if mentions else " 和 ".join(persons) if persons else "值班人员"
+
+        # 使用 emoji + 换行格式化
+        message = (
+            ":sunny: *Good morning!*\n"
+            f"{mention_text}\n"
+            f":clipboard: *Today's Duty:* {duty}\n"
+            ":sparkles: Thanks for your work!"
+        )
+
         print(f" 发送消息: {message}")
 
-        # 发送 Slack 消息
+        # 发送 Slack 消息（逐个私聊）
         for slack_id in [slack1, slack2]:
             if slack_id and slack_id.startswith("U"):
                 slack_url = "https://slack.com/api/chat.postMessage"
@@ -91,4 +105,4 @@ for page in data.get("results", []):
 
         tasks_sent += 1
 
-print(f" 脚本执行完成，共发送 {tasks_sent} 条任务通知")
+print(f" ✅ 脚本执行完成，共发送 {tasks_sent} 条任务通知")
