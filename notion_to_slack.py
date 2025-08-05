@@ -1,6 +1,6 @@
 import requests
 import os
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 # ========== 读取环境变量 ==========
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
@@ -23,8 +23,10 @@ SLACK_HEADERS = {
 }
 
 # ========== 获取今天的日期 ==========
-today = datetime.now().strftime("%Y-%m-%d")  # 格式：2025-07-29
-print(f" 当前日期：{today}")
+# 设置时区为 JST (UTC+9)
+JST = timezone(timedelta(hours=9))
+today = datetime.now(JST).strftime("%Y-%m-%d")
+print(f" 当前日本时间日期：{today}")
 
 # ========== 查询 Notion 数据：Start Date == 今天 ==========
 query_url = f"https://api.notion.com/v1/databases/{DATABASE_ID}/query"
