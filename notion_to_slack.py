@@ -79,7 +79,7 @@ for page in data.get("results", []):
             if sid and sid.startswith("U"):
                 mentions.append(f"<@{sid}>")
         mention_text = " ".join(mentions) if mentions else " 和 ".join(persons) if persons else "值班人员"
-        db_url = "https://www.notion.so/213756632df1801a8af4d3a2fedf094f?v=213756632df18082a98b000c091a028a&source=copy_link"
+        db_url = "https://www.notion.so/213756632df180c78f56e15f294995e0?v=213756632df180fbbcf7000c58b9a3be&source=copy_link"
         message = (
             ":sunny: *Good morning!*\n"
             f"{mention_text}\n"
