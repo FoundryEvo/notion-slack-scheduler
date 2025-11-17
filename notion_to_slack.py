@@ -7,34 +7,29 @@ NOTION_TOKEN = os.getenv("NOTION_TOKEN")
 DATABASE_ID = os.getenv("DATABASE_ID")
 SLACK_TOKEN = os.getenv("SLACK_TOKEN")
 
-# 可选：如果同一个数据库下有多个 data source，可用名字来精确选择
-DATA_SOURCE_NAME = os.getenv("DATA_SOURCE_NAME")  # 例如 "On-call Duty 表"；留空则选第一个
-
-
-# ============================
-#  Notion API
-# ============================
-NOTION_QUERY_URL = f"https://api.notion.com/v1/databases/{DATABASE_ID}/query"
-NOTION_PAGE_URL = "https://api.notion.com/v1/pages"
-NOTION_HEADERS = {
-    "Authorization": f"Bearer {NOTION_TOKEN}",
-    "Notion-Version": "2022-06-28",  # 如果你之前是 2025-09-03 并且可以正常用，就保持你原来的即可
-    "Content-Type": "application/json",
-}
-
 if not NOTION_TOKEN or not DATABASE_ID or not SLACK_TOKEN:
     raise ValueError("缺少 Notion Token、Database ID 或 Slack Token，请在 GitHub Secrets 设置")
 
+# ============================
+#  Notion & Slack API
+# ============================
+NOTION_API = "https://api.notion.com/v1"
+NOTION_QUERY_URL = f"{NOTION_API}/databases/{DATABASE_ID}/query"
+NOTION_PAGE_URL = f"{NOTION_API}/pages"
+
+NOTION_HEADERS = {
+    "Authorization": f"Bearer {NOTION_TOKEN}",
+    "Notion-Version": "2022-06-28",  # ✅ 继续使用旧版本
+    "Content-Type": "application/json",
+}
 
 SLACK_HEADERS = {
     "Authorization": f"Bearer {SLACK_TOKEN}",
-    "Content-Type": "application/json"
+    "Content-Type": "application/json",
 }
 
-NOTION_API = "https://api.notion.com/v1"
-
-# ========== 这里写死 Person 名称 -> Slack ID 映射 ==========
-# 注意：key 必须和 Notion Person 列里显示的名字一模一样（包括大小写、空格、中文）
+# ========== Person 名称 -> Slack 用户 ID 映射 ==========
+# ⚠️ key 必须和 Notion Person 列中显示的名字完全一致
 PERSON_TO_SLACK = {
     "LIU PENG": "U05UK795E3Y",
     "温述安": "U05URS5A7RQ",
@@ -45,58 +40,38 @@ PERSON_TO_SLACK = {
     "Arman Syah Goli": "U05URS51M4J",
 }
 
-
-# ========== 工具函数：根据 database_id 获取 data_source_id ==========
-def get_data_source_id(database_id: str, preferred_name: str | None = None) -> str:
-    resp = requests.get(f"{NOTION_API}/databases/{database_id}", headers=NOTION_HEADERS)
-    try:
-        resp.raise_for_status()
-    except Exception:
-        raise SystemExit(f"获取数据库信息失败：{resp.status_code} {resp.text}")
-
-    db = resp.json()
-    sources = db.get("data_sources", [])
-    if not sources:
-        raise SystemExit("该数据库下没有 data source（或无权限可见）。")
-
-    if preferred_name:
-        for s in sources:
-            if (s.get("name") or "").strip() == preferred_name.strip():
-                return s["id"]
-
-    # 默认取第一个（如有多个，建议配置 DATA_SOURCE_NAME 精确选择）
-    return sources[0]["id"]
-
-
 # ========== 获取日本时间日期 ==========
 JST = timezone(timedelta(hours=9))
-today = datetime.now(JST).date()  # e.g. 2025-08-06
+today = datetime.now(JST).date()
 print(f" 当前日本时间日期：{today}")
 
-# ========== 🔧 先拿 data_source_id，再用 data source 查询 ==========
-DATA_SOURCE_ID = get_data_source_id(DATABASE_ID, DATA_SOURCE_NAME)
-
-# 你原来是全量拉取；如果需要可在 body 里加 filter/sorts/page_size
-query_url = f"{NOTION_API}/data_sources/{DATA_SOURCE_ID}/query"  # 🔧 新端点
-response = requests.post(query_url, headers=NOTION_HEADERS, json={})
-data = response.json()
-
-if "results" not in data:
-    print(f" Notion API 错误响应: {data}")
+# ========== 查询 Notion 数据库（旧版端点） ==========
+response = requests.post(NOTION_QUERY_URL, headers=NOTION_HEADERS, json={})
+try:
+    response.raise_for_status()
+except Exception:
+    print(" Notion API 错误响应:", response.status_code, response.text)
     raise SystemExit("无法获取 Notion 数据，请检查 Token、Database ID 或权限/版本设置")
+
+data = response.json()
+if "results" not in data:
+    print(" Notion API 异常返回:", data)
+    raise SystemExit("无法获取 Notion 数据，请检查响应结构")
 
 tasks_sent = 0
 status_updates = 0
 
 # ========== 遍历每条记录 ==========
 for page in data.get("results", []):
-    props = page["properties"]
+    props = page.get("properties", {})
     page_id = page["id"]
 
     # 获取 Duty
-    duty = props["Duty"]["title"][0]["plain_text"] if props["Duty"]["title"] else "未命名任务"
+    duty_prop = props.get("Duty", {})
+    duty_title = duty_prop.get("title", [])
+    duty = duty_title[0]["plain_text"] if duty_title else "未命名任务"
 
-    # 人员姓名（Notion Person 列里选中的人）
+    # Person 列：值班人
     persons = []
     if "Person" in props and props["Person"].get("people"):
         persons = [p.get("name") for p in props["Person"]["people"] if p.get("name")]
@@ -115,7 +90,6 @@ for page in data.get("results", []):
     start_date = props.get("Start Date", {}).get("date", {}).get("start")
     end_date = props.get("End Date", {}).get("date", {}).get("start")
 
-    # 转换为 date 对象
     start_date_obj = datetime.fromisoformat(start_date).date() if start_date else None
     end_date_obj = datetime.fromisoformat(end_date).date() if end_date else None
 
@@ -124,9 +98,8 @@ for page in data.get("results", []):
 
     # ✅ 1. 如果今天是 Start Date & 未通知 → 发 Slack + 状态改 Ongoing
     if start_date_obj == today and not notified:
-        # Mentions：优先用 Slack ID @mention，不存在时就用人名文本
         mentions = []
-        for sid in set(slack_ids):  # 去重一下
+        for sid in set(slack_ids):
             if sid and sid.startswith("U"):
                 mentions.append(f"<@{sid}>")
 
@@ -155,13 +128,13 @@ for page in data.get("results", []):
                 payload = {"channel": slack_id, "text": message}
                 res = requests.post(slack_url, headers=SLACK_HEADERS, json=payload)
                 ok = (res.status_code == 200 and res.json().get("ok") is True)
-                print(f" 发送给 {slack_id} {'成功' if ok else f'失败 {res.status_code} {res.text}'}")
+                print(f"  发送给 {slack_id} {'成功' if ok else f'失败 {res.status_code} {res.text}'}")
 
         # 更新 Notion (标记已通知 + 状态改 Ongoing)
         update_data = {
             "properties": {
                 "Notification Status": {"checkbox": True},
-                "Status": {"status": {"name": "Ongoing"}}
+                "Status": {"status": {"name": "Ongoing"}},
             }
         }
         requests.patch(f"{NOTION_API}/pages/{page_id}", headers=NOTION_HEADERS, json=update_data)
@@ -172,7 +145,7 @@ for page in data.get("results", []):
     if end_date_obj and today > end_date_obj and current_status != "Done":
         update_data = {
             "properties": {
-                "Status": {"status": {"name": "Done"}}
+                "Status": {"status": {"name": "Done"}},
             }
         }
         requests.patch(f"{NOTION_API}/pages/{page_id}", headers=NOTION_HEADERS, json=update_data)
