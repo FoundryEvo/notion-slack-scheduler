@@ -25,18 +25,6 @@ NOTION_HEADERS = {
 if not NOTION_TOKEN or not DATABASE_ID or not SLACK_TOKEN:
     raise ValueError("缺少 Notion Token、Database ID 或 Slack Token，请在 GitHub Secrets 设置")
 
-# ========== 设置 API 请求头 ==========
-NOTION_HEADERS = {
-    "Authorization": f"Bearer {NOTION_TOKEN}",
-    "Content-Type": "application/json",
-    # 🔧 升级到新版本
-    "Notion-Version": "2025-09-03"
-}
-
-SLACK_HEADERS = {
-    "Authorization": f"Bearer {SLACK_TOKEN}",
-    "Content-Type": "application/json"
-}
 
 NOTION_API = "https://api.notion.com/v1"
 
@@ -89,16 +77,34 @@ for page in data.get("results", []):
     # 获取 Duty
     duty = props["Duty"]["title"][0]["plain_text"] if props["Duty"]["title"] else "未命名任务"
 
-    # Slack 用户 ID
-    slack1 = props.get("Slack Username 1", {}).get("rich_text", [])
-    slack1 = slack1[0]["plain_text"] if slack1 else None
-    slack2 = props.get("Slack Username 2", {}).get("rich_text", [])
-    slack2 = slack2[0]["plain_text"] if slack2 else None
-
-    # 人员姓名
+    # 人员姓名（Notion Person 列）
     persons = []
     if "Person" in props and props["Person"].get("people"):
         persons = [p.get("name") for p in props["Person"]["people"] if p.get("name")]
+
+    # ====== 🔧 NEW: 根据 Person → 环境变量 → Slack ID ======
+    # 规则：对每个 Person 名字，生成环境变量名：SLACK_ID_<NAME>
+    # NAME 会被转为大写，并把半角/全角空格替换为下划线
+    #
+    # 例如：
+    #   Person: "Taro Yamada"  -> 环境变量: SLACK_ID_TARO_YAMADA
+    #   Person: "山田太郎"      -> 环境变量: SLACK_ID_山田太郎
+    #
+    # 然后在 CI/服务器环境里设置：
+    #   SLACK_ID_TARO_YAMADA=UXXXXXXX
+    #   SLACK_ID_山田太郎=UYYYYYYY
+    slack_ids = []
+    for person_name in persons:
+        if not person_name:
+            continue
+        env_key = "SLACK_ID_" + (
+            person_name.upper()
+            .replace(" ", "_")   # 半角空格
+            .replace("　", "_")  # 全角空格
+        )
+        slack_id = os.getenv(env_key)
+        if slack_id:
+            slack_ids.append(slack_id)
 
     # 当前状态
     current_status = props.get("Status", {}).get("status", {}).get("name", "")
@@ -116,11 +122,19 @@ for page in data.get("results", []):
 
     # ✅ 1. 如果今天是 Start Date & 未通知 → 发 Slack + 状态改 Ongoing
     if start_date_obj == today and not notified:
+        # Mentions：优先用 Slack ID @mention，不存在时就用人名文本
         mentions = []
-        for sid in [slack1, slack2]:
+        for sid in slack_ids:
             if sid and sid.startswith("U"):
                 mentions.append(f"<@{sid}>")
-        mention_text = " ".join(mentions) if mentions else " 和 ".join(persons) if persons else "值班人员"
+
+        if mentions:
+            mention_text = " ".join(mentions)
+        elif persons:
+            mention_text = " 和 ".join(persons)
+        else:
+            mention_text = "值班人员"
+
         db_url = "https://www.notion.so/213756632df180c78f56e15f294995e0?v=213756632df180fbbcf7000c58b9a3be&source=copy_link"
         message = (
             ":sunny: *Good morning!*\n"
@@ -132,7 +146,8 @@ for page in data.get("results", []):
 
         print(f" 发送消息: {message}")
 
-        for slack_id in [slack1, slack2]:
+        # 给所有有匹配到 Slack ID 的人发 DM（去重一下）
+        for slack_id in set(slack_ids):
             if slack_id and slack_id.startswith("U"):
                 slack_url = "https://slack.com/api/chat.postMessage"
                 payload = {"channel": slack_id, "text": message}
