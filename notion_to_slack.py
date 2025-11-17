@@ -10,6 +10,18 @@ SLACK_TOKEN = os.getenv("SLACK_TOKEN")
 # 可选：如果同一个数据库下有多个 data source，可用名字来精确选择
 DATA_SOURCE_NAME = os.getenv("DATA_SOURCE_NAME")  # 例如 "On-call Duty 表"；留空则选第一个
 
+
+# ============================
+#  Notion API
+# ============================
+NOTION_QUERY_URL = f"https://api.notion.com/v1/databases/{DATABASE_ID}/query"
+NOTION_PAGE_URL = "https://api.notion.com/v1/pages"
+NOTION_HEADERS = {
+    "Authorization": f"Bearer {NOTION_TOKEN}",
+    "Notion-Version": "2022-06-28",
+    "Content-Type": "application/json",
+}
+
 if not NOTION_TOKEN or not DATABASE_ID or not SLACK_TOKEN:
     raise ValueError("缺少 Notion Token、Database ID 或 Slack Token，请在 GitHub Secrets 设置")
 
