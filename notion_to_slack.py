@@ -18,7 +18,7 @@ NOTION_QUERY_URL = f"https://api.notion.com/v1/databases/{DATABASE_ID}/query"
 NOTION_PAGE_URL = "https://api.notion.com/v1/pages"
 NOTION_HEADERS = {
     "Authorization": f"Bearer {NOTION_TOKEN}",
-    "Notion-Version": "2022-06-28",
+    "Notion-Version": "2022-06-28",  # 如果你之前是 2025-09-03 并且可以正常用，就保持你原来的即可
     "Content-Type": "application/json",
 }
 
@@ -26,7 +26,25 @@ if not NOTION_TOKEN or not DATABASE_ID or not SLACK_TOKEN:
     raise ValueError("缺少 Notion Token、Database ID 或 Slack Token，请在 GitHub Secrets 设置")
 
 
+SLACK_HEADERS = {
+    "Authorization": f"Bearer {SLACK_TOKEN}",
+    "Content-Type": "application/json"
+}
+
 NOTION_API = "https://api.notion.com/v1"
+
+# ========== 这里写死 Person 名称 -> Slack ID 映射 ==========
+# 注意：key 必须和 Notion Person 列里显示的名字一模一样（包括大小写、空格、中文）
+PERSON_TO_SLACK = {
+    "LIU PENG": "U05UK795E3Y",
+    "温述安": "U05URS5A7RQ",
+    "HE JIAQI": "U051URPC4V7",
+    "matsuda": "U01107CAKS5",
+    "Shun Masuda": "U06S1PK7Z7U",
+    "asuka suzuki": "U03AJPLCP5M",
+    "Arman Syah Goli": "U05URS51M4J",
+}
+
 
 # ========== 工具函数：根据 database_id 获取 data_source_id ==========
 def get_data_source_id(database_id: str, preferred_name: str | None = None) -> str:
@@ -48,6 +66,7 @@ def get_data_source_id(database_id: str, preferred_name: str | None = None) -> s
 
     # 默认取第一个（如有多个，建议配置 DATA_SOURCE_NAME 精确选择）
     return sources[0]["id"]
+
 
 # ========== 获取日本时间日期 ==========
 JST = timezone(timedelta(hours=9))
@@ -77,34 +96,17 @@ for page in data.get("results", []):
     # 获取 Duty
     duty = props["Duty"]["title"][0]["plain_text"] if props["Duty"]["title"] else "未命名任务"
 
-    # 人员姓名（Notion Person 列）
+    # 人员姓名（Notion Person 列里选中的人）
     persons = []
     if "Person" in props and props["Person"].get("people"):
         persons = [p.get("name") for p in props["Person"]["people"] if p.get("name")]
 
-    # ====== 🔧 NEW: 根据 Person → 环境变量 → Slack ID ======
-    # 规则：对每个 Person 名字，生成环境变量名：SLACK_ID_<NAME>
-    # NAME 会被转为大写，并把半角/全角空格替换为下划线
-    #
-    # 例如：
-    #   Person: "Taro Yamada"  -> 环境变量: SLACK_ID_TARO_YAMADA
-    #   Person: "山田太郎"      -> 环境变量: SLACK_ID_山田太郎
-    #
-    # 然后在 CI/服务器环境里设置：
-    #   SLACK_ID_TARO_YAMADA=UXXXXXXX
-    #   SLACK_ID_山田太郎=UYYYYYYY
+    # 根据 Person 名字查 Slack ID
     slack_ids = []
     for person_name in persons:
-        if not person_name:
-            continue
-        env_key = "SLACK_ID_" + (
-            person_name.upper()
-            .replace(" ", "_")   # 半角空格
-            .replace("　", "_")  # 全角空格
-        )
-        slack_id = os.getenv(env_key)
-        if slack_id:
-            slack_ids.append(slack_id)
+        sid = PERSON_TO_SLACK.get(person_name)
+        if sid:
+            slack_ids.append(sid)
 
     # 当前状态
     current_status = props.get("Status", {}).get("status", {}).get("name", "")
@@ -113,7 +115,7 @@ for page in data.get("results", []):
     start_date = props.get("Start Date", {}).get("date", {}).get("start")
     end_date = props.get("End Date", {}).get("date", {}).get("start")
 
-    # 转换为 date 对象（注意：ISO 8601 可能含时区；fromisoformat 能处理带偏移的字符串）
+    # 转换为 date 对象
     start_date_obj = datetime.fromisoformat(start_date).date() if start_date else None
     end_date_obj = datetime.fromisoformat(end_date).date() if end_date else None
 
@@ -124,7 +126,7 @@ for page in data.get("results", []):
     if start_date_obj == today and not notified:
         # Mentions：优先用 Slack ID @mention，不存在时就用人名文本
         mentions = []
-        for sid in slack_ids:
+        for sid in set(slack_ids):  # 去重一下
             if sid and sid.startswith("U"):
                 mentions.append(f"<@{sid}>")
 
@@ -146,7 +148,7 @@ for page in data.get("results", []):
 
         print(f" 发送消息: {message}")
 
-        # 给所有有匹配到 Slack ID 的人发 DM（去重一下）
+        # 给所有匹配到 Slack ID 的人发 DM
         for slack_id in set(slack_ids):
             if slack_id and slack_id.startswith("U"):
                 slack_url = "https://slack.com/api/chat.postMessage"
