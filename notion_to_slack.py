@@ -38,6 +38,7 @@ PERSON_TO_SLACK = {
     "Shun Masuda": "U06S1PK7Z7U",
     "asuka suzuki": "U03AJPLCP5M",
     "Arman Syah Goli": "U05URS51M4J",
+    "s2621446@u.tsukuba.ac.jp": "U0AR9HA69AS",
 }
 
 # ========== 获取日本时间日期 ==========
